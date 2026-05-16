@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "VideoContext App",
+  "version": "0.2.0",
+  "description": "Turn screen recordings into AI-ready context. Capture, extract the best frames, paste them into any LLM. videocontext.app",
+  "homepage_url": "https://videocontext.app",
+
+  "action": {
+    "default_title": "VideoContext App — toggle recorder",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "permissions": [
+    "desktopCapture",
+    "clipboardWrite",
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
