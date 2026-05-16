@@ -98,11 +98,16 @@
     .brand { display: flex; align-items: center; gap: 9px; }
     .brand-dot {
       width: 22px; height: 22px; border-radius: 6px;
-      background: #6C63FF;
+      overflow: hidden;
       display: inline-flex; align-items: center; justify-content: center;
       flex-shrink: 0;
+      background: #6C63FF;
     }
-    .brand-dot svg { display: block; }
+    .brand-dot img {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      display: block;
+    }
     .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
     .brand-name { font-weight: 600; font-size: 14px; color: #1a1a22; }
     .brand-domain {
@@ -421,7 +426,7 @@
       <div class="card-header">
         <div class="brand">
           <span class="brand-dot">
-            <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="2,1 9,5 2,9" fill="white"/></svg>
+            <img src="${chrome.runtime.getURL("assets/logo.png")}" alt="" />
           </span>
           <div class="brand-text">
             <span class="brand-name">VideoContext App</span>

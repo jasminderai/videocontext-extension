@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="VideoContext App" width="120" />
+</p>
+
 # VideoContext App — Chrome Extension
 
 > Turn screen recordings into AI-ready context. Record your screen, extract the most useful frames, and paste them into Claude, ChatGPT, or Gemini.

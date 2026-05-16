@@ -1,16 +1,17 @@
 {
   "manifest_version": 3,
   "name": "VideoContext App",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Turn screen recordings into AI-ready context. Capture, extract the best frames, paste them into any LLM. videocontext.app",
+  "author": "Jasminder Pal Singh",
   "homepage_url": "https://videocontext.app",
 
   "action": {
     "default_title": "VideoContext App — toggle recorder",
     "default_icon": {
-      "16": "icons/icon16.png",
-      "48": "icons/icon48.png",
-      "128": "icons/icon128.png"
+      "16": "assets/logo.png",
+      "48": "assets/logo.png",
+      "128": "assets/logo.png"
     }
   },
 
@@ -27,8 +28,15 @@
   ],
 
   "icons": {
-    "16": "icons/icon16.png",
-    "48": "icons/icon48.png",
-    "128": "icons/icon128.png"
-  }
+    "16": "assets/logo.png",
+    "48": "assets/logo.png",
+    "128": "assets/logo.png"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["assets/logo.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
