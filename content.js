@@ -4,14 +4,14 @@
  * Injected on action button click by background.js (chrome.scripting).
  * Re-injection toggles visibility, so clicking the icon twice opens/closes.
  *
- * UI layout (Loom-style):
+ * UI layout:
  *   - Main control card, top-right.
  *       Source picker (Tab / Window / Screen)
  *       Select Area button + crop badge
  *       Start Recording button
  *       Frame grid + action bar (appears after a recording)
  *   - Recording strip, left edge of viewport.
- *       Vertical column with Stop / Pause / Restart / Discard / Timer.
+ *       Vertical column with Stop / Pause / Discard / Timer.
  *   - Page dim overlay behind both panels while active.
  *   - Area-select overlay: full-viewport, draw a rect on the page.
  *
@@ -46,9 +46,20 @@
     stream:    null,
     recording: false,
     paused:    false,
-    autoStopId: null,
     countdownId: null,
     captureTimerId: null,
+    stripTimerId: null,            // setInterval id for the strip readout
+    captureGen: 0,                 // bumped each begin/stop so in-flight
+                                   // toBlob callbacks know to bail
+    recordingStartedAt: null,      // performance.now() at beginCapture
+    recordingDurationSec: 0,       // chosen preset duration (used for auto-stop)
+    pausedAccumMs: 0,              // total ms spent paused this recording
+    pausedAt: null,                // performance.now() when current pause started
+    // Countdown (3-2-1) pause state — separate from recording pause.
+    countdownPaused: false,
+    countdownStartedAt: null,
+    countdownPausedAt: null,
+    countdownPausedAccumMs: 0,
     frames:    [],
     selected:  new Set(),
     cropRectCss: null,       // { x, y, w, h } in CSS px relative to viewport
@@ -189,9 +200,9 @@
     }
     .area-clear {
       border: none; background: transparent; cursor: pointer;
-      color: #b5536a; font-size: 18px; padding: 4px 8px; border-radius: 6px;
+      color: #ff5f44; font-size: 18px; padding: 4px 8px; border-radius: 6px;
     }
-    .area-clear:hover { background: #fdecef; }
+    .area-clear:hover { background: rgba(255,95,68,0.08); }
 
     /* Primary CTA */
     .cta {
@@ -261,12 +272,12 @@
       background: #6C63FF; border-color: #6C63FF; color: #fff;
     }
     .action-btn.primary:hover { background: #5a52e0; }
-    .action-btn.danger { color: #c0392b; }
-    .action-btn.danger:hover { background: #fdecea; border-color: #f5c6c0; }
+    .action-btn.danger { color: #ff5f44; }
+    .action-btn.danger:hover { background: rgba(255,95,68,0.08); border-color: rgba(255,95,68,0.35); }
 
     .warn {
-      background: #fff8db; border: 1px solid #ffe27a;
-      color: #7d6207;
+      background: #fafafd; border: 1px solid rgba(255,95,68,0.35);
+      color: #ff5f44;
       border-radius: 8px;
       padding: 8px 10px; font-size: 12px;
       margin-top: 8px;
@@ -285,8 +296,8 @@
       z-index: 2147483647;
     }
     .toast.show { opacity: 1; }
-    .toast.error { background: #c0392b; }
-    .toast.success { background: #2c8a4a; }
+    .toast.error   { background: #ff5f44; }
+    .toast.success { background: #6C63FF; }
 
     /* ── Recording strip (left side, vertical) ─────────────────── */
     .strip {
@@ -309,51 +320,59 @@
     .strip-btn.stop { background: #ff5f44; }
     .strip-btn.stop:hover { background: #ff4a2c; }
 
-    /* ── 3-2-1 countdown ───────────────────────────────────────── */
+    /* Countdown readout inside the strip — flex-centered, palette-only. */
+    .strip-timer {
+      width: 42px;
+      height: 28px;
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255,255,255,0.12);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: #fff;
+      letter-spacing: 0.5px;
+      font-variant-numeric: tabular-nums;
+      user-select: none;
+    }
+    .strip-timer.warn   { color: #ff5f44; }
+
+    /* ── 3-2-1 countdown ─────────────────────────────────────────
+       Lives in the same left-edge slot as the recording strip:
+       a big number with a cancel button below it, nothing else. */
     .countdown {
-      position: fixed; inset: 0;
+      position: fixed; left: 18px; top: 50%; transform: translateY(-50%);
       display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 26px;
-      pointer-events: none;
+      align-items: center;
+      gap: 14px;
+      pointer-events: auto;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                    Helvetica, Arial, sans-serif;
     }
-    .cd-row {
-      display: flex; align-items: center; gap: 30px;
-      pointer-events: auto;
-    }
-    .cd-circle {
-      width: 180px; height: 180px;
-      border-radius: 50%;
-      background: #3a72ff;
-      color: #fff;
-      font-size: 110px; font-weight: 600; line-height: 1;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 14px 50px rgba(58,114,255,0.45),
-                  0 0 0 8px rgba(58,114,255,0.18);
-      user-select: none;
-    }
-    .cd-side {
+    .cd-num {
       width: 88px; height: 88px;
       border-radius: 50%;
-      background: rgba(0,0,0,0.55);
-      border: 2px solid rgba(255,255,255,0.7);
+      background: #6C63FF;
+      color: #fff;
+      font-size: 56px; font-weight: 600; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 10px 30px rgba(108,99,255,0.45),
+                  0 0 0 6px rgba(108,99,255,0.18);
+      user-select: none;
+    }
+    .cd-ctrl {
+      width: 36px; height: 36px;
+      border-radius: 50%;
+      background: rgba(26,26,34,0.85);
+      border: 1.5px solid rgba(255,255,255,0.7);
       color: #fff;
       cursor: pointer;
       display: flex; align-items: center; justify-content: center;
       transition: background 120ms, transform 80ms;
     }
-    .cd-side:hover  { background: rgba(0,0,0,0.75); }
-    .cd-side:active { transform: scale(0.94); }
-    .cd-hint {
-      background: rgba(0,0,0,0.75);
-      color: #fff;
-      padding: 8px 14px;
-      border-radius: 999px;
-      font-size: 13px;
-      pointer-events: none;
-    }
+    .cd-ctrl:hover  { background: #1a1a22; }
+    .cd-ctrl:active { transform: scale(0.92); }
 
     /* ── Area-select overlay ───────────────────────────────────── */
     .area-overlay {
@@ -383,23 +402,21 @@
   // ── 5. UI templates ─────────────────────────────────────────────
   const root = document.createElement("div");
   root.innerHTML = `
-    <!-- 3-2-1 countdown (between stream acquired and frame capture) -->
+    <!-- 3-2-1 countdown (between stream acquired and frame capture).
+         Sits in the same left-edge slot as the recording strip. -->
     <div class="countdown hidden" id="countdown">
-      <div class="cd-row">
-        <button class="cd-side" id="btn-cd-cancel" title="Cancel">
-          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
-            <path d="M8 8l16 16M24 8L8 24"/>
-          </svg>
-        </button>
-        <div class="cd-circle" id="cd-num">3</div>
-        <button class="cd-side" id="btn-cd-skip" title="Skip to recording">
-          <svg width="30" height="30" viewBox="0 0 30 30" fill="currentColor">
-            <polygon points="8,6 20,15 8,24"/>
-            <rect x="21" y="6" width="3" height="18" rx="1"/>
-          </svg>
-        </button>
-      </div>
-      <div class="cd-hint">Press Esc to cancel</div>
+      <div class="cd-num" id="cd-num">3</div>
+      <button class="cd-ctrl" id="btn-cd-pause" title="Pause">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+          <rect x="2" y="2" width="3" height="10" rx="1"/>
+          <rect x="9" y="2" width="3" height="10" rx="1"/>
+        </svg>
+      </button>
+      <button class="cd-ctrl" id="btn-cd-cancel" title="Cancel (Esc)">
+        <svg width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M4 4l10 10M14 4L4 14"/>
+        </svg>
+      </button>
     </div>
 
     <!-- Area select layer -->
@@ -419,6 +436,7 @@
       <button class="strip-btn" id="btn-discard" title="Discard">
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 4h9M5 4V2.5h4V4M4 4l.5 8a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1L10 4"/></svg>
       </button>
+      <div class="strip-timer" id="strip-timer" title="Time remaining">0:00</div>
     </div>
 
     <!-- Main control card -->
@@ -520,6 +538,7 @@
     btnStop:       $("btn-stop"),
     btnPause:      $("btn-pause"),
     btnDiscard:    $("btn-discard"),
+    stripTimer:    $("strip-timer"),
     btnClose:      $("btn-close"),
     modeBtns:      shadow.querySelectorAll(".mode-pill"),
     presetBtns:    shadow.querySelectorAll(".preset-chip"),
@@ -540,8 +559,8 @@
     areaHint:     $("area-hint"),
     countdown:    $("countdown"),
     cdNum:        $("cd-num"),
+    btnCdPause:   $("btn-cd-pause"),
     btnCdCancel:  $("btn-cd-cancel"),
-    btnCdSkip:    $("btn-cd-skip"),
     toast:        $("toast"),
   };
 
@@ -745,45 +764,87 @@
   //   2. By the time it ends, Chrome's focus on the picker UI has fully
   //      released, so keyboard input reaches the page without a tap.
 
+  // Total countdown duration in ms (3 → 2 → 1 → go).
+  const COUNTDOWN_TOTAL_MS = 3000;
+
   function startCountdown() {
     // Hide the card; show the countdown overlay
     els.card.classList.add("hidden");
     els.countdown.classList.remove("hidden");
-    let n = 3;
-    paintCountdown(n);
+
+    // Reset pause-aware countdown state
+    state.countdownPaused        = false;
+    state.countdownStartedAt     = performance.now();
+    state.countdownPausedAt      = null;
+    state.countdownPausedAccumMs = 0;
+
+    let lastN = 3;
+    paintCountdown(lastN);
+    paintCountdownPauseBtn(false);
     returnFocusToPage();
 
     state.countdownId = setInterval(() => {
-      n -= 1;
-      if (n <= 0) {
+      const now       = performance.now();
+      const pausedNow = state.countdownPausedAt !== null
+        ? (now - state.countdownPausedAt) : 0;
+      const elapsed   = (now - state.countdownStartedAt)
+                        - state.countdownPausedAccumMs - pausedNow;
+      const remaining = COUNTDOWN_TOTAL_MS - elapsed;
+
+      if (remaining <= 0) {
         clearInterval(state.countdownId);
         state.countdownId = null;
         els.countdown.classList.add("hidden");
         beginCapture();
         return;
       }
-      paintCountdown(n);
-    }, 1000);
+
+      const n = Math.ceil(remaining / 1000);
+      if (n !== lastN) {
+        lastN = n;
+        paintCountdown(n);
+      }
+    }, 100);
 
     els.btnCdCancel.onclick = cancelCountdown;
-    els.btnCdSkip.onclick   = skipCountdown;
+    els.btnCdPause.onclick  = toggleCountdownPause;
+  }
+
+  function toggleCountdownPause() {
+    if (!state.countdownId) return;
+    state.countdownPaused = !state.countdownPaused;
+
+    if (state.countdownPaused) {
+      state.countdownPausedAt = performance.now();
+    } else if (state.countdownPausedAt !== null) {
+      state.countdownPausedAccumMs += performance.now() - state.countdownPausedAt;
+      state.countdownPausedAt = null;
+    }
+    paintCountdownPauseBtn(state.countdownPaused);
+  }
+
+  function paintCountdownPauseBtn(isPaused) {
+    els.btnCdPause.title = isPaused ? "Resume" : "Pause";
+    els.btnCdPause.innerHTML = isPaused
+      ? `<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+           <polygon points="3,2 12,7 3,12"/>
+         </svg>`
+      : `<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor">
+           <rect x="2" y="2" width="3" height="10" rx="1"/>
+           <rect x="9" y="2" width="3" height="10" rx="1"/>
+         </svg>`;
   }
 
   function paintCountdown(n) {
     els.cdNum.textContent = String(n);
-    // Re-trigger pop animation on each digit
-    els.cdNum.animate(
-      [
-        { transform: "scale(0.7)", opacity: 0.2 },
-        { transform: "scale(1.08)", opacity: 1, offset: 0.6 },
-        { transform: "scale(1)",   opacity: 1 },
-      ],
-      { duration: 420, easing: "cubic-bezier(.2,.9,.3,1)" }
-    );
   }
 
   function cancelCountdown() {
     if (state.countdownId) { clearInterval(state.countdownId); state.countdownId = null; }
+    state.countdownPaused        = false;
+    state.countdownStartedAt     = null;
+    state.countdownPausedAt      = null;
+    state.countdownPausedAccumMs = 0;
     els.countdown.classList.add("hidden");
     els.card.classList.remove("hidden");
     // Stop the already-acquired stream — the user changed their mind
@@ -795,13 +856,7 @@
     resetRecordButton();
   }
 
-  function skipCountdown() {
-    if (state.countdownId) { clearInterval(state.countdownId); state.countdownId = null; }
-    els.countdown.classList.add("hidden");
-    beginCapture();
-  }
-
-  /**
+/**
    * Aggressively push keyboard focus back to the page. Used at countdown
    * start so the page is fully focused by the time recording begins.
    *
@@ -834,20 +889,33 @@
     state.paused    = false;
     state.frames    = [];
     state.selected  = new Set();
+    state.captureGen += 1;
     els.framesGrid.innerHTML = "";
     els.framesSection.classList.add("hidden");
 
     const preset = PRESETS[state.preset];
 
-    // Loom-style: hide the full control card while recording. Only the side
-    // strip stays visible so the page is unobscured.
+    // Hide the full control card while recording. Only the side strip stays
+    // visible so the page is unobscured.
     els.strip.classList.remove("hidden");
     els.btnRecord.classList.add("hidden");
     els.card.classList.add("hidden");
 
-    // Auto-stop after the preset duration. No visible countdown — duration
-    // is fixed and known up-front; an in-strip ticker added noise.
-    state.autoStopId = setTimeout(() => stopRecording(true), preset.duration * 1000);
+    // Pause-aware auto-stop: there is no wall-clock setTimeout. The strip
+    // timer interval below computes remaining ms using paused-accounted
+    // elapsed time, and triggers stopRecording when it crosses zero.
+    state.recordingStartedAt = performance.now();
+    state.recordingDurationSec = preset.duration;
+    state.pausedAccumMs = 0;
+    state.pausedAt = null;
+    els.stripTimer.classList.remove("warn");
+    renderStripTimer(preset.duration);
+    state.stripTimerId = setInterval(() => {
+      const stillRunning = renderStripTimer(preset.duration);
+      if (!stillRunning && state.recording) {
+        stopRecording(true);
+      }
+    }, 100);
 
     // Resolve crop rect in *video pixels* using the stream's actual dimensions
     const cropVideoRect = resolveCropForStream();
@@ -881,8 +949,16 @@
     const ctx = captureCanvas.getContext("2d");
     ctx.drawImage(hiddenVideo, sx, sy, sw, sh, 0, 0, sw, sh);
 
+    // toBlob is async — capture the recording generation now so the callback
+    // can bail if the user discarded or stopped before the blob landed.
+    const gen = state.captureGen;
     captureCanvas.toBlob((blob) => {
       if (!blob) return;
+      if (gen !== state.captureGen || !state.recording) {
+        // Recording was stopped/discarded mid-encode. Drop this frame and
+        // free the blob immediately.
+        return;
+      }
       const idx = state.frames.length;
       const url = URL.createObjectURL(blob);
       const frame = { blob, url, index: idx };
@@ -935,6 +1011,15 @@
   function togglePause() {
     if (!state.recording) return;
     state.paused = !state.paused;
+
+    // Keep the strip timer's "elapsed" calculation honest while paused.
+    if (state.paused) {
+      state.pausedAt = performance.now();
+    } else if (state.pausedAt !== null) {
+      state.pausedAccumMs += performance.now() - state.pausedAt;
+      state.pausedAt = null;
+    }
+
     // Swap the pause/resume icon
     const svg = state.paused
       ? `<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><polygon points="3,2 12,7 3,12"/></svg>`
@@ -942,9 +1027,35 @@
     els.btnPause.innerHTML = svg;
   }
 
+  /**
+   * Render the strip's countdown readout in mm:ss based on pause-aware
+   * elapsed time. Returns true while time remains, false once it hits zero
+   * (so the caller can trigger stopRecording).
+   */
+  function renderStripTimer(durationSec) {
+    if (state.recordingStartedAt === null) return false;
+    const now = performance.now();
+    const pausedNow = state.pausedAt !== null ? (now - state.pausedAt) : 0;
+    const elapsedMs = (now - state.recordingStartedAt) - state.pausedAccumMs - pausedNow;
+    const remainingMs = Math.max(0, durationSec * 1000 - elapsedMs);
+    const totalSec = Math.ceil(remainingMs / 1000);
+    const mm = Math.floor(totalSec / 60);
+    const ss = totalSec % 60;
+    els.stripTimer.textContent = `${mm}:${ss.toString().padStart(2, "0")}`;
+    els.stripTimer.classList.toggle("warn", remainingMs > 0 && remainingMs <= 3000);
+    return remainingMs > 0;
+  }
+
   function stopRecording(autoStopped) {
     if (state.captureTimerId) { clearInterval(state.captureTimerId); state.captureTimerId = null; }
-    if (state.autoStopId)     { clearTimeout(state.autoStopId);      state.autoStopId = null; }
+    if (state.stripTimerId)   { clearInterval(state.stripTimerId);   state.stripTimerId = null; }
+    // Invalidate any in-flight toBlob callbacks from frames whose encoding
+    // started before we stopped.
+    state.captureGen += 1;
+    state.recordingStartedAt = null;
+    state.pausedAccumMs = 0;
+    state.pausedAt = null;
+    els.stripTimer.classList.remove("warn");
 
     if (state.stream) {
       state.stream.getTracks().forEach((t) => t.stop());

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VideoContext App",
-  "version": "0.3.0",
+  "version": "0.3.3",
   "description": "Turn screen recordings into AI-ready context. Capture, extract the best frames, paste them into any LLM. videocontext.app",
   "author": "Jasminder Pal Singh",
   "homepage_url": "https://videocontext.app",
@@ -22,7 +22,6 @@
   "permissions": [
     "desktopCapture",
     "clipboardWrite",
-    "storage",
     "scripting",
     "activeTab"
   ],

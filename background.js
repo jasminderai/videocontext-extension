@@ -4,7 +4,7 @@
  * Architecture:
  *   Click toolbar icon → inject content.js into active tab → widget appears.
  *   The content script holds the live stream, frame extractor, clipboard ops,
- *   and the whole Loom-style floating UI (Shadow DOM).
+ *   and the whole floating UI (Shadow DOM).
  *
  *   The service worker only does two things:
  *     1. Inject the content script on action click.
@@ -13,7 +13,7 @@
  *
  * Why the content-script lives on the page:
  *   - Survives picker focus loss (no MV3 popup auto-close).
- *   - Lets the user draw an area-select region directly on the page (Loom-style).
+ *   - Lets the user draw an area-select region directly on the page.
  *   - Lets us render a floating control bar overlaid on the page DOM.
  *
  * Port protocol:
@@ -54,7 +54,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // Open an info notification — content scripts can't inject into chrome://
     // pages and similar. Best we can do is alert the user.
     chrome.action.setBadgeText({ text: "✕", tabId: tab.id });
-    chrome.action.setBadgeBackgroundColor({ color: "#c0392b", tabId: tab.id });
+    chrome.action.setBadgeBackgroundColor({ color: "#ff5f44", tabId: tab.id });
     setTimeout(() => chrome.action.setBadgeText({ text: "", tabId: tab.id }), 2500);
     return;
   }
